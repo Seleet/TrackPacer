@@ -14,14 +14,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import androidx.compose.runtime.rememberCoroutineScope
-import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
+import android.widget.Toast  // Importing Toast
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         setContent {
             MyApp()
         }
@@ -33,6 +31,8 @@ fun MyApp() {
     var minutes by remember { mutableStateOf("") }
     var seconds by remember { mutableStateOf("") }
     var interval by remember { mutableStateOf("50") }
+    var timeRemaining by remember { mutableIntStateOf(0) } // Using mutableIntStateOf for optimization
+    var isTimerRunning by remember { mutableStateOf(false) } // MutableState for dynamic changes
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -51,7 +51,7 @@ fun MyApp() {
                 value = minutes,
                 onValueChange = { minutes = it },
                 label = { Text("Minutes") },
-               
+                //keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 8.dp)
@@ -60,7 +60,7 @@ fun MyApp() {
                 value = seconds,
                 onValueChange = { seconds = it },
                 label = { Text("Seconds") },
-
+                //keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 8.dp)
@@ -69,35 +69,78 @@ fun MyApp() {
                 value = interval,
                 onValueChange = { interval = it },
                 label = { Text("Interval (meters)") },
-
+                //keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 8.dp)
             )
-            Button(onClick = {
-                if (minutes.isNotEmpty() && seconds.isNotEmpty()) {
-                    val totalSeconds = (minutes.toIntOrNull() ?: 0) * 60 + (seconds.toIntOrNull() ?: 0)
-                    val intervalMeters = interval.toIntOrNull() ?: 50
-                    scope.launch {
-                        notifyUserAtInterval(totalSeconds, intervalMeters, context)
+
+            // Display remaining time until next interval
+            Text(
+                text = "Time Remaining: $timeRemaining seconds",
+                style = MaterialTheme.typography.headlineMedium,
+                modifier = Modifier.padding(16.dp)
+            )
+
+            Row {
+                // Start Button
+                Button(onClick = {
+                    if (minutes.isNotEmpty() && seconds.isNotEmpty()) {
+                        val totalSeconds = (minutes.toIntOrNull() ?: 0) * 60 + (seconds.toIntOrNull() ?: 0)
+                        val intervalMeters = interval.toIntOrNull() ?: 50
+                        isTimerRunning = true // Start the timer
+                        scope.launch {
+                            notifyUserAtInterval(
+                                totalSeconds,
+                                intervalMeters,
+                                context,
+                                timeRemainingSetter = { timeRemaining = it },
+                                isTimerRunning = { isTimerRunning } // Pass the isTimerRunning state
+                            )
+                        }
                     }
+                }) {
+                    Text("Start")
                 }
-            }) {
-                Text("Start")
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                // Stop Button
+                Button(onClick = {
+                    isTimerRunning = false // Stop the timer
+                }) {
+                    Text("Stop")
+                }
             }
         }
     }
 }
 
-suspend fun notifyUserAtInterval(totalSecondsPerKm: Int, intervalMeters: Int, context: android.content.Context) {
+suspend fun notifyUserAtInterval(
+    totalSecondsPerKm: Int,
+    intervalMeters: Int,
+    context: android.content.Context,
+    timeRemainingSetter: (Int) -> Unit, // A function to update the UI with the remaining time
+    isTimerRunning: () -> Boolean // A function to check the current value of isTimerRunning
+) {
     val timePerMeter = totalSecondsPerKm / 1000.0
     val timePerInterval = timePerMeter * intervalMeters
-    val mediaPlayer = MediaPlayer.create(context, R.raw.ringklocka) // Replace with the actual file name in res/raw
+    val mediaPlayer = MediaPlayer.create(context, R.raw.ringklocka)
 
-    while (true) {
-        delay((timePerInterval * 1000).toLong())
+    while (isTimerRunning()) {
+        var countdownTime = timePerInterval.toInt()
 
-        // Play the custom m4a sound
+        // Countdown loop for each interval
+        while (countdownTime > 0 && isTimerRunning()) {
+            timeRemainingSetter(countdownTime)
+            delay(1000)
+            countdownTime -= 1
+        }
+
+        // Stop the timer if it has been cancelled
+        if (!isTimerRunning()) break
+
+        // Play sound at the end of each interval
         if (!mediaPlayer.isPlaying) {
             mediaPlayer.start()
         }
